@@ -1,0 +1,99 @@
+name: clinicadent-backend-prod
+
+services:
+  oracle:
+    image: gvenzl/oracle-free:23
+    container_name: clinicadent-oracle-prod
+    restart: unless-stopped
+    ports:
+      - "41521:1521"
+      - "45500:5500"
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
+      APP_USER: ${DB_USERNAME}
+      APP_USER_PASSWORD: ${DB_PASSWORD}
+      TZ: America/Lima
+    volumes:
+      - oracle-data-prod:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  keycloak-db:
+    image: postgres:17-alpine
+    container_name: clinicadent-keycloak-db-prod
+    restart: unless-stopped
+    ports:
+      - "45432:5432"
+    environment:
+      POSTGRES_DB: clinicadent_keycloak
+      POSTGRES_USER: clinicadent_keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - keycloak-db-data-prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clinicadent_keycloak -d clinicadent_keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.0
+    container_name: clinicadent-keycloak-prod
+    restart: unless-stopped
+    command: start-dev --import-realm
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    ports:
+      - "48080:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/clinicadent_keycloak
+      KC_DB_USERNAME: clinicadent_keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - keycloak-data-prod:/opt/keycloak/data
+      - ./keycloak-import:/opt/keycloak/data/import
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: clinicadent-redis-prod
+    restart: unless-stopped
+    ports:
+      - "46379:6379"
+
+  clinicadent-backend:
+    build: .
+    container_name: clinicadent-backend-prod
+    restart: unless-stopped
+    depends_on:
+      oracle:
+        condition: service_healthy
+      keycloak-db:
+        condition: service_healthy
+    ports:
+      - "48088:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: oracle
+      DB_PORT: 1521
+      DB_NAME: FREEPDB1
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KEYCLOAK_HOST: keycloak
+      KEYCLOAK_PORT: 8080
+
+volumes:
+  oracle-data-prod:
+  keycloak-data-prod:
+  keycloak-db-data-prod:
+
